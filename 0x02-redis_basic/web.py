@@ -1,37 +1,48 @@
-#!/usr/bin/env python3
-"""Implementing an expiring web cache and tracker"""
-
-from functools import wraps
-import redis
 import requests
-from typing import Callable
+import redis
+import time
+from functools import wraps
 
+# Initialize the Redis client
 r = redis.Redis()
 
-
-def count_requests(method: Callable) -> Callable:
-    """ Decorator for counting how many times a request
-    has been made """
-
-    @wraps(method)
-    def wrapper(url):
-        """ Wrapper for decorator functionality """
-        r.incr(f"count:{url}")
-        cached_html = r.get(f"cached:{url}")
-        if cached_html:
-            return cached_html.decode('utf-8')
-
-        html = method(url)
-        r.setex(f"cached:{url}", 10, html)
-        return html
-
-    return wrapper
-
-
-@count_requests
-def get_page(url: str) -> str:
-    """Uses the requests module to obtain the HTML
-    content of a particular URL and returns it.
+def cache_with_expiration(expiration: int):
     """
-    req = requests.get(url)
-    return req.text
+    Decorator to cache the result of the function in Redis with an expiration time.
+    Also tracks how many times a particular URL was accessed.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(url: str):
+            cache_key = f"cache:{url}"
+            count_key = f"count:{url}"
+
+            # Check if the URL content is already cached
+            cached_result = r.get(cache_key)
+            if cached_result:
+                print(f"Cache hit for {url}")
+                return cached_result.decode('utf-8')
+
+            # If not cached, fetch the content
+            print(f"Cache miss for {url}. Fetching...")
+            result = func(url)
+
+            # Store the result in cache with an expiration time
+            r.setex(cache_key, expiration, result)
+
+            # Increment the access count
+            r.incr(count_key)
+
+            return result
+
+        return wrapper
+    return decorator
+
+@cache_with_expiration(10)
+def get_page(url: str) -> str:
+    """
+    Fetch the content of a URL and cache the result with an expiration time.
+    Track the number of times the URL is accessed.
+    """
+    response = requests.get(url)
+    return response.text
