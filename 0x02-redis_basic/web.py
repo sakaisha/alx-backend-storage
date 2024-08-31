@@ -1,33 +1,32 @@
 #!/usr/bin/env python3
-"""
-Implementing an expriting web cache and tracker
-"""
-import requests
+""" Redis Module """
+
+from functools import wraps
 import redis
-import time
+import requests
+from typing import Callable
+
+redis_ = redis.Redis()
 
 
-redis_client = redis.Redis(host='localhost', port=6379, db=0)
+def count_requests(method: Callable) -> Callable:
+    """ Decortator for counting """
+    @wraps(method)
+    def wrapper(url):  # sourcery skip: use-named-expression
+        """ Wrapper for decorator """
+        redis_.incr(f"count:{url}")
+        cached_html = redis_.get(f"cached:{url}")
+        if cached_html:
+            return cached_html.decode('utf-8')
+        html = method(url)
+        redis_.setex(f"cached:{url}", 10, html)
+        return html
+
+    return wrapper
 
 
+@count_requests
 def get_page(url: str) -> str:
-    """
-    Fetches HTML content from URL
-    """
-    cached_html = redis_client.get(url)
-
-    if cached_html:
-        print(f"{Returning cached content for {url}")
-        return cached_html.decode('utf-8')
-
-    response = requests.get(url)
-    html_content = response.text
-
-    redis_client.setex(url, 10, html_content)
-
-    count_key = f"count:{url}"
-    redis_client.incr(count_key)
-
-    print(f"Feteched new content for {url}")
-
-    return html_content
+    """ Obtain the HTML content of a  URL """
+    req = requests.get(url)
+    return req.text
